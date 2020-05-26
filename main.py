@@ -27,6 +27,15 @@ class MainSystem(BaseSystem):
         self.dot = np.vstack((x1dot, x2dot))
 
 
+class LPF(BaseSystem):
+    def __init__(self, initial_state=None):
+        super().__init__(initial_state)
+        # TODO
+
+    def set_dot(self, u):
+        self.dot = - (self.state - u) / config.TAUF
+
+
 class Filter(BaseEnv):
     def __init__(self, phic0, na):
         super().__init__()
@@ -35,6 +44,12 @@ class Filter(BaseEnv):
         self.xia = BaseSystem(shape=(na, 1))
         self.d = BaseSystem()
         self.dast = BaseSystem()
+
+        self.y = LPF()
+        self.xic = LPF(phic0)
+        self.xia = LPF(shape=(na, 1))
+        self.d = LPF()
+        self.dast = LPF()
 
     def set_dot(self, q, phic, pru, uhat_square, uast_square):
         self.y.dot = -(self.y.state + q) / config.TAUF
