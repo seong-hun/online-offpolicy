@@ -28,23 +28,18 @@ class MainSystem(BaseSystem):
 
 
 class LPF(BaseSystem):
-    def __init__(self, initial_state=None):
-        super().__init__(initial_state)
-        # TODO
-
     def set_dot(self, u):
         self.dot = - (self.state - u) / config.TAUF
+
+
+class MemorySystem(BaseSystem):
+    def set_dot(self, u):
+        self.dot = - config.K * self.state + u
 
 
 class Filter(BaseEnv):
     def __init__(self, phic0, na):
         super().__init__()
-        self.y = BaseSystem()
-        self.xic = BaseSystem(phic0)
-        self.xia = BaseSystem(shape=(na, 1))
-        self.d = BaseSystem()
-        self.dast = BaseSystem()
-
         self.y = LPF()
         self.xic = LPF(phic0)
         self.xia = LPF(shape=(na, 1))
@@ -52,27 +47,27 @@ class Filter(BaseEnv):
         self.dast = LPF()
 
     def set_dot(self, q, phic, pru, uhat_square, uast_square):
-        self.y.dot = -(self.y.state + q) / config.TAUF
-        self.xic.dot = -(self.xic.state - phic) / config.TAUF
-        self.xia.dot = -(self.xia.state - 2 * pru) / config.TAUF
-        self.d.dot = -(self.d.state - uhat_square) / config.TAUF
-        self.dast.dot = -(self.dast.state - uast_square) / config.TAUF
+        self.y.set_dot(-q)
+        self.xic.set_dot(phic)
+        self.xia.set_dot(2 * pru)
+        self.d.set_dot(uhat_square)
+        self.dast.set_dot(uast_square)
 
 
 class Memory(BaseEnv):
     def __init__(self, nc, na):
         super().__init__()
         N = nc + na
-        self.Y = BaseSystem(shape=(N, 1))
-        self.Xi = BaseSystem(shape=(N, N))
-        self.D = BaseSystem(shape=(N, 1))
-        self.Dast = BaseSystem(shape=(N, 1))
+        self.Y = MemorySystem(shape=(N, 1))
+        self.Xi = MemorySystem(shape=(N, N))
+        self.D = MemorySystem(shape=(N, 1))
+        self.Dast = MemorySystem(shape=(N, 1))
 
     def set_dot(self, xi, y, d, dast):
-        self.Y.dot = -config.K * self.Y.state + xi.dot(y)
-        self.Xi.dot = -config.K * self.Xi.state + xi.dot(xi.T)
-        self.D.dot = -config.K * self.D.state + xi.dot(d)
-        self.Dast.dot = -config.K * self.Dast.state + xi.dot(dast)
+        self.Y.set_dot(xi.dot(y))
+        self.Xi.set_dot(xi.dot(xi.T))
+        self.D.set_dot(xi.dot(d))
+        self.Dast.set_dot(xi.dot(dast))
 
 
 class ActorCritic(BaseEnv):
@@ -86,8 +81,16 @@ class ActorCritic(BaseEnv):
 
         self.dot = (
             - config.ETA * (Xi.dot(w) - Y - D)
-            - 1 / config.TAUF * cprpc.dot(w) * d
+            # - 1 / config.TAUF * cprpc.dot(w) * d
         )
+
+
+class TargetActor(BaseSystem):
+    def __init__(self, na):
+        super().__init__(shape=(na, 1))
+
+    def set_dot(self, caw):
+        self.dot = config.ETA_PI * (self.state - caw)
 
 
 class Env(BaseEnv):
@@ -105,6 +108,7 @@ class Env(BaseEnv):
         self.actor_critic = ActorCritic(nc, na)
         self.filter = Filter(phic0=phic, na=na)
         self.memory = Memory(nc, na)
+        self.target = TargetActor(na)
 
         self.Ca = np.block([np.zeros((na, nc)), np.eye(na)])
 
@@ -113,7 +117,7 @@ class Env(BaseEnv):
         return done
 
     def set_dot(self, t):
-        x, w, (y, xic, xia, d, dast), (Y, Xi, D, Dast) = self.observe_list()
+        x, w, (y, xic, xia, d, dast), (Y, Xi, D, Dast), wpi = self.observe_list()
         w = np.vstack(w)
 
         # print(np.linalg.eigvals(Xi).min())
@@ -130,13 +134,17 @@ class Env(BaseEnv):
         cprpc = Ca.T.dot(Phia).dot(R).dot(Phia.T).dot(Ca)
         self.actor_critic.set_dot(Xi, Y, D, cprpc, d)
 
+        # Target dynamics
+        caw = Ca.dot(w)
+        self.target.set_dot(caw)
+
         # Filter dynamics
-        q = self.q(x)
+        pi = Phia.T.dot(wpi)
+        q = self.q(x) + pi.T.dot(R).dot(pi)
         phic = self.phic(x)
-        pru = Phia.dot(R).dot(u)
-        uhat = Phia.T.dot(Ca).dot(w)
+        pru = Phia.dot(R).dot(u - pi)
         uast = Phia.T.dot(Ca).dot(self.wast)
-        uhat_square = uhat.T.dot(R).dot(uhat)
+        uhat_square = pi.T.dot(R).dot(pi)
         uast_square = uast.T.dot(R).dot(uast)
 
         self.filter.set_dot(q, phic, pru, uhat_square, uast_square)
