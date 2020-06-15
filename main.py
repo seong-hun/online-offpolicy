@@ -7,6 +7,21 @@ import config
 import figure
 
 
+def get_q(x):
+    return x.T.dot(config.Q).dot(x)
+
+
+def get_Phia(x):
+    x1, x2 = x
+    co = np.cos(2 * x1) + 2
+    return np.vstack((x1 * co, 2 * x2 * co)) / 2
+
+
+def get_phic(x):
+    x1, x2 = x
+    return np.vstack((x1**2, x1 * x2, x2**2))
+
+
 class MainSystem(BaseSystem):
     """
     Model from (2010 Vamvoudakis & Lewis)
@@ -32,26 +47,30 @@ class LPF(BaseSystem):
         self.dot = - (self.state - u) / config.TAUF
 
 
-class MemorySystem(BaseSystem):
-    def set_dot(self, u):
-        self.dot = - config.K * self.state + u
-
-
 class Filter(BaseEnv):
     def __init__(self, phic0, na):
         super().__init__()
-        self.y = LPF()
-        self.xic = LPF(phic0)
-        self.xia = LPF(shape=(na, 1))
-        self.d = LPF()
-        self.dast = LPF()
+        self.qf = LPF()
+        self.phicf = LPF(phic0)
+        self.prpf = LPF(shape=(na, na))
+        self.pruf = LPF(shape=(na, 1))
 
-    def set_dot(self, q, phic, pru, uhat_square, uast_square):
-        self.y.set_dot(-q)
-        self.xic.set_dot(phic)
-        self.xia.set_dot(2 * pru)
-        self.d.set_dot(uhat_square)
-        self.dast.set_dot(uast_square)
+    def set_dot(self, x, u):
+        R, Phia = config.R, get_Phia(x)
+        q = get_q(x)
+        phic = get_phic(x)
+        prp = Phia.dot(R).dot(Phia.T)
+        pru = Phia.dot(R).dot(u)
+
+        self.qf.set_dot(q)
+        self.phicf.set_dot(phic)
+        self.prpf.set_dot(prp)
+        self.pruf.set_dot(pru)
+
+
+class MemorySystem(BaseSystem):
+    def set_dot(self, u):
+        self.dot = - config.K * self.state + u
 
 
 class Memory(BaseEnv):
@@ -74,15 +93,35 @@ class ActorCritic(BaseEnv):
     def __init__(self, nc, na):
         super().__init__()
         self.wc = BaseSystem(shape=(nc, 1))
+        self.wt = BaseSystem(shape=(na, 1))
         self.wa = BaseSystem(shape=(na, 1))
 
-    def set_dot(self, Xi, Y, D, cprpc, d):
-        w = self.state[:, None]
+    def set_dot(self, x, filter_state):
+        ac_state = self.observe_list()
+        qf, phicf, prpf, pruf = filter_state
+        wc, wt, wa = ac_state
 
-        self.dot = (
-            - config.ETA * (Xi.dot(w) - Y - D)
-            # - 1 / config.TAUF * cprpc.dot(w) * d
+        phic = get_phic(x)
+        dphicf = 1 / config.TAUF * (phic - phicf)
+        e = self.get_error(x, filter_state, ac_state)
+        self.wc.dot = - config.ETA * dphicf * e
+        self.wt.dot = - config.ETA * (-2) * (prpf.dot(wa) - pruf) * e
+        self.wa.dot = - 10 * (wa - wt)
+
+    def get_error(self, x, filter_state, ac_state):
+        qf, phicf, prpf, pruf = filter_state
+        wc, wt, wa = ac_state
+
+        phic = get_phic(x)
+        dphicf = 1 / config.TAUF * (phic - phicf)
+        e = (
+            wc.T.dot(dphicf)
+            - 2 * wt.T.dot(prpf).dot(wa)
+            + 2 * wt.T.dot(pruf)
+            + qf
+            + wa.T.dot(prpf).dot(wa)
         )
+        return e
 
 
 class TargetActor(BaseSystem):
@@ -94,82 +133,61 @@ class TargetActor(BaseSystem):
 
 
 class Env(BaseEnv):
-    Q = np.eye(2)
-    R = 1
-    wast = np.vstack((0.5, 0, 1, 0.5, 1))
-
     def __init__(self):
         super().__init__(dt=config.TIME_STEP, max_t=config.FINAL_TIME)
         x = config.INITIAL_STATE
-        phic = self.phic(x)
+        phic = get_phic(x)
         nc = phic.shape[0]
-        na = self.Phia(x).shape[0]
+        na = get_Phia(x).shape[0]
         self.system = MainSystem(x)
-        self.actor_critic = ActorCritic(nc, na)
         self.filter = Filter(phic0=phic, na=na)
-        self.memory = Memory(nc, na)
-        self.target = TargetActor(na)
+        self.actor_critic = ActorCritic(nc, na)
 
-        self.Ca = np.block([np.zeros((na, nc)), np.eye(na)])
+    def logger_callback(self, i, t, y, t_hist, ode_hist):
+        state = self.observe_dict(y)
+        x = state["system"]
+        filter_state = state["filter"].values()
+        ac_state = state["actor_critic"].values()
+
+        u = self.get_behavior(t, x)
+        R, Phia = config.R, get_Phia(x)
+        q = get_q(x)
+        phic = get_phic(x)
+        prp = Phia.dot(R).dot(Phia.T)
+        pru = Phia.dot(R).dot(u)
+        e = self.actor_critic.get_error(x, filter_state, ac_state)
+        return dict(
+            time=t,
+            state=state,
+            control=u,
+            filter_true=dict(q=q, phic=phic, prp=prp, pru=pru),
+            e=e,
+        )
 
     def step(self):
         *_, done = self.update()
         return done
 
     def set_dot(self, t):
-        x, w, (y, xic, xia, d, dast), (Y, Xi, D, Dast), wpi = self.observe_list()
-        w = np.vstack(w)
-
-        # print(np.linalg.eigvals(Xi).min())
+        x = self.system.state
+        filter_state = self.filter.observe_list()
 
         # Main system
-        x1, x2 = x
-        u = - x2[:, None] + 0.1 * np.sin(2 * t) + 0.15 * np.cos(4 * t + 1)
+        u = self.get_behavior(t, x)
         self.system.set_dot(u)
 
-        # Parameter dynamics
-        Ca, R = self.Ca, config.R
-        Phia = self.Phia(x)
-
-        cprpc = Ca.T.dot(Phia).dot(R).dot(Phia.T).dot(Ca)
-        self.actor_critic.set_dot(Xi, Y, D, cprpc, d)
-
-        # Target dynamics
-        caw = Ca.dot(w)
-        self.target.set_dot(caw)
-
         # Filter dynamics
-        pi = Phia.T.dot(wpi)
-        q = self.q(x) + pi.T.dot(R).dot(pi)
-        phic = self.phic(x)
-        pru = Phia.dot(R).dot(u - pi)
-        uast = Phia.T.dot(Ca).dot(self.wast)
-        uhat_square = pi.T.dot(R).dot(pi)
-        uast_square = uast.T.dot(R).dot(uast)
+        self.filter.set_dot(x, u)
 
-        self.filter.set_dot(q, phic, pru, uhat_square, uast_square)
+        # Actor-critic dynamics
+        self.actor_critic.set_dot(x, filter_state)
 
-        # Memory dynamics
-        xi = np.vstack((
-            1 / config.TAUF * (phic - xic),
-            xia
-        ))
-        self.memory.set_dot(xi, y, d, dast)
-
-    def q(self, x):
-        return x.T.dot(config.Q).dot(x)
-
-    def Phia(self, x):
+    def get_behavior(self, t, x):
         x1, x2 = x
-        co = np.cos(2 * x1) + 2
-        return np.vstack((x1 * co, 2 * x2 * co)) / 2
-
-    def phic(self, x):
-        x1, x2 = x
-        return np.vstack((x1**2, x1 * x2, x2**2))
-
-    def phia(self, x):
-        pass
+        u = - x2[:, None]
+        u += 0.3 * np.sin(1/20 * t) * np.cos(4 * t + 1)
+        u += 0.2 * np.exp(-t/20) * np.sin(t + 2)
+        return u
 
 
 def main():
