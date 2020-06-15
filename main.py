@@ -103,10 +103,12 @@ class ActorCritic(BaseEnv):
 
         phic = get_phic(x)
         dphicf = 1 / config.TAUF * (phic - phicf)
+        EPS = 1e-8
         e = self.get_error(x, filter_state, ac_state)
+        e = e / (np.abs(e) + EPS)
         self.wc.dot = - config.ETA * dphicf * e
         self.wt.dot = - config.ETA * (-2) * (prpf.dot(wa) - pruf) * e
-        self.wa.dot = - 10 * (wa - wt)
+        self.wa.dot = - 1 * (wa - wt)
 
     def get_error(self, x, filter_state, ac_state):
         qf, phicf, prpf, pruf = filter_state
@@ -150,18 +152,23 @@ class Env(BaseEnv):
         ac_state = state["actor_critic"].values()
 
         u = self.get_behavior(t, x)
+
         R, Phia = config.R, get_Phia(x)
         q = get_q(x)
         phic = get_phic(x)
         prp = Phia.dot(R).dot(Phia.T)
         pru = Phia.dot(R).dot(u)
+
         e = self.actor_critic.get_error(x, filter_state, ac_state)
+        true_ac_state = config.WCAST, config.WAAST, config.WAAST
+        true_e = self.actor_critic.get_error(x, filter_state, true_ac_state)
         return dict(
             time=t,
             state=state,
             control=u,
             filter_true=dict(q=q, phic=phic, prp=prp, pru=pru),
             e=e,
+            true_e=true_e,
         )
 
     def step(self):
@@ -185,7 +192,7 @@ class Env(BaseEnv):
     def get_behavior(self, t, x):
         x1, x2 = x
         u = - x2[:, None]
-        u += 0.3 * np.sin(1/20 * t) * np.cos(4 * t + 1)
+        u += 0.3 * np.sin(1/20 * t) * np.cos(4 * np.exp(-t/30) * t + 1)
         u += 0.2 * np.exp(-t/20) * np.sin(t + 2)
         return u
 

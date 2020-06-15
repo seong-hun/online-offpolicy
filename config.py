@@ -3,7 +3,7 @@ import os
 
 # Simulation setup
 TIME_STEP = 1e-3
-FINAL_TIME = 40
+FINAL_TIME = 100
 INITIAL_STATE = np.vstack((-1, -1))
 
 # Actor Critic
