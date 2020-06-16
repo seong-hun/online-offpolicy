@@ -13,8 +13,7 @@ def get_q(x):
 
 def get_Phia(x):
     x1, x2 = x
-    co = np.cos(2 * x1) + 2
-    return np.vstack((x1 * co, 2 * x2 * co)) / 2
+    return np.vstack((x2, x2 * np.cos(2 * x1)))
 
 
 def get_phic(x):
@@ -102,10 +101,10 @@ class ActorCritic(BaseEnv):
         wc, wt, wa = ac_state
 
         phic = get_phic(x)
-        dphicf = 1 / config.TAUF * (phic - phicf)
-        EPS = 1e-8
+        dphicf = - (phicf - phic) / config.TAUF
         e = self.get_error(x, filter_state, ac_state)
-        e = e / (np.abs(e) + EPS)
+        # EPS = 1e-8
+        # e = e / (np.abs(e) + EPS)
         self.wc.dot = - config.ETA * dphicf * e
         self.wt.dot = - config.ETA * (-2) * (prpf.dot(wa) - pruf) * e
         self.wa.dot = - 1 * (wa - wt)
@@ -115,7 +114,7 @@ class ActorCritic(BaseEnv):
         wc, wt, wa = ac_state
 
         phic = get_phic(x)
-        dphicf = 1 / config.TAUF * (phic - phicf)
+        dphicf = - (phicf - phic) / config.TAUF
         e = (
             wc.T.dot(dphicf)
             - 2 * wt.T.dot(prpf).dot(wa)
@@ -138,11 +137,11 @@ class Env(BaseEnv):
     def __init__(self):
         super().__init__(dt=config.TIME_STEP, max_t=config.FINAL_TIME)
         x = config.INITIAL_STATE
-        phic = get_phic(x)
-        nc = phic.shape[0]
+        phic0 = get_phic(x)
+        nc = phic0.shape[0]
         na = get_Phia(x).shape[0]
         self.system = MainSystem(x)
-        self.filter = Filter(phic0=phic, na=na)
+        self.filter = Filter(phic0=phic0, na=na)
         self.actor_critic = ActorCritic(nc, na)
 
     def logger_callback(self, i, t, y, t_hist, ode_hist):

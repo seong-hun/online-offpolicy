@@ -54,7 +54,7 @@ def plot():
     plt.subplot(224)
     plt.plot(time, data["e"].squeeze(), "k")
     plt.plot(time, data["true_e"].squeeze(), "r--")
-    plt.ylim(-0.2, 0.2)
+    # plt.ylim(-0.2, 0.2)
     plt.xlim(0, time.max())
 
     plt.show()

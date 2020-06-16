@@ -3,7 +3,7 @@ import os
 
 # Simulation setup
 TIME_STEP = 1e-3
-FINAL_TIME = 100
+FINAL_TIME = 20
 INITIAL_STATE = np.vstack((-1, -1))
 
 # Actor Critic
@@ -14,4 +14,4 @@ K = 1e2
 R = 1
 Q = np.eye(2)
 WCAST = np.vstack((0.5, 0, 1))
-WAAST = np.vstack((0.5, 1))
+WAAST = np.vstack((-2, -1))
