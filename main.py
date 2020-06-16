@@ -91,9 +91,9 @@ class Memory(BaseEnv):
 class ActorCritic(BaseEnv):
     def __init__(self, nc, na):
         super().__init__()
-        self.wc = BaseSystem(shape=(nc, 1))
-        self.wt = BaseSystem(shape=(na, 1))
-        self.wa = BaseSystem(shape=(na, 1))
+        self.wc = BaseSystem(config.WCINIT)
+        self.wt = BaseSystem(config.WTINIT)
+        self.wa = BaseSystem(config.WAINIT)
 
     def set_dot(self, x, filter_state):
         ac_state = self.observe_list()
@@ -107,7 +107,7 @@ class ActorCritic(BaseEnv):
         # e = e / (np.abs(e) + EPS)
         self.wc.dot = - config.ETA * dphicf * e
         self.wt.dot = - config.ETA * (-2) * (prpf.dot(wa) - pruf) * e
-        self.wa.dot = - 1 * (wa - wt)
+        self.wa.dot = - 1 * (wa - wt) * np.exp(- 10 * np.abs(e))
 
     def get_error(self, x, filter_state, ac_state):
         qf, phicf, prpf, pruf = filter_state
@@ -191,8 +191,9 @@ class Env(BaseEnv):
     def get_behavior(self, t, x):
         x1, x2 = x
         u = - x2[:, None]
-        u += 0.3 * np.sin(1/20 * t) * np.cos(4 * np.exp(-t/30) * t + 1)
+        u += 0.3 * np.sin(1/20 * t) * np.cos(4 * np.exp(-t/120) * t + 1)
         u += 0.2 * np.exp(-t/20) * np.sin(t + 2)
+        # u += 0.4 * np.sin(2 * (1 - np.exp(-t/120)) * t + 2)
         return u
 
 
