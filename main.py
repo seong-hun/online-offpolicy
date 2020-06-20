@@ -106,7 +106,7 @@ class ActorCritic(BaseEnv):
         # EPS = 1e-8
         # e = e / (np.abs(e) + EPS)
         self.wc.dot = - config.ETA * dphicf * e
-        self.wt.dot = - config.ETA * (-2) * (prpf.dot(wa) - pruf) * e
+        self.wt.dot = - config.ETA * (-2) * (prpf.dot(wt) - pruf) * e
         # self.wa.dot = - 1 * (wa - wt) * np.exp(- 10 * np.abs(e))
         self.wa.dot = (
             - 1 * (wa - wt)
@@ -123,10 +123,10 @@ class ActorCritic(BaseEnv):
         dphicf = - (phicf - phic) / config.TAUF
         e = (
             wc.T.dot(dphicf)
-            - 2 * wt.T.dot(prpf).dot(wa)
+            - 2 * wt.T.dot(prpf).dot(wt)
             + 2 * wt.T.dot(pruf)
             + qf
-            + wa.T.dot(prpf).dot(wa)
+            + wt.T.dot(prpf).dot(wt)
         )
         return e
 
