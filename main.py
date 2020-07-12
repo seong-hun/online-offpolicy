@@ -106,14 +106,14 @@ class ActorCritic(BaseEnv):
         # EPS = 1e-8
         # e = e / (np.abs(e) + EPS)
         self.wc.dot = - config.ETA * dphicf * e
-        self.wt.dot = - config.ETA * (-2) * (prpf.dot(wt) - pruf) * e
-        # self.wa.dot = - 1 * (wa - wt) * np.exp(- 10 * np.abs(e))
-        self.wa.dot = (
-            - 1 * (wa - wt)
-            + config.ETA * prpf.dot(wa) * (
-                wc.T.dot(dphicf) - 2 * wt.T.dot(prpf.dot(wa) - pruf)
-            )
-        )
+        self.wt.dot = - config.ETA * (-2) * (prpf.dot(wa) - pruf) * e
+        self.wa.dot = - 1 * (wa - wt) * np.exp(- 10 * np.abs(e))
+        # self.wa.dot = (
+        #     - 1 * (wa - wt)
+        #     + config.ETA * prpf.dot(wa) * (
+        #         wc.T.dot(dphicf) - 2 * wt.T.dot(prpf.dot(wa) - pruf)
+        #     )
+        # )
 
     def get_error(self, x, filter_state, ac_state):
         qf, phicf, prpf, pruf = filter_state
@@ -123,10 +123,9 @@ class ActorCritic(BaseEnv):
         dphicf = - (phicf - phic) / config.TAUF
         e = (
             wc.T.dot(dphicf)
-            - 2 * wt.T.dot(prpf).dot(wt)
-            + 2 * wt.T.dot(pruf)
+            - 2 * wt.T.dot(prpf.dot(wa) - pruf)
             + qf
-            + wt.T.dot(prpf).dot(wt)
+            + wa.T.dot(prpf).dot(wa)
         )
         return e
 
